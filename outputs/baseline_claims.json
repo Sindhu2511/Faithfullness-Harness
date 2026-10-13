@@ -1,0 +1,92 @@
+[
+  {
+    "id": "r01",
+    "claims": [
+      {
+        "claim_id": "r01-c1",
+        "text": "Marie Curie was born in Warsaw.",
+        "source_sentence": "Marie Curie was born in Warsaw.",
+        "triple": null
+      },
+      {
+        "claim_id": "r01-c2",
+        "text": "She won two Nobel Prizes, one in Physics and one in Chemistry.",
+        "source_sentence": "She won two Nobel Prizes, one in Physics and one in Chemistry.",
+        "triple": null
+      }
+    ]
+  },
+  {
+    "id": "r02",
+    "claims": [
+      {
+        "claim_id": "r02-c1",
+        "text": "Albert Einstein, who developed the theory of relativity, was born in Ulm in 1879.",
+        "source_sentence": "Albert Einstein, who developed the theory of relativity, was born in Ulm in 1879.",
+        "triple": null
+      }
+    ]
+  },
+  {
+    "id": "r03",
+    "claims": [
+      {
+        "claim_id": "r03-c1",
+        "text": "Isaac Newton formulated the laws of motion and was born in London.",
+        "source_sentence": "Isaac Newton formulated the laws of motion and was born in London.",
+        "triple": null
+      }
+    ]
+  },
+  {
+    "id": "r04",
+    "claims": [
+      {
+        "claim_id": "r04-c1",
+        "text": "Pierre Curie was a French physicist.",
+        "source_sentence": "Pierre Curie was a French physicist.",
+        "triple": null
+      },
+      {
+        "claim_id": "r04-c2",
+        "text": "He married Marie Curie in 1895, and together they discovered polonium.",
+        "source_sentence": "He married Marie Curie in 1895, and together they discovered polonium.",
+        "triple": null
+      }
+    ]
+  },
+  {
+    "id": "r05",
+    "claims": [
+      {
+        "claim_id": "r05-c1",
+        "text": "Charles Darwin is arguably the most influential biologist ever.",
+        "source_sentence": "Charles Darwin is arguably the most influential biologist ever.",
+        "triple": null
+      },
+      {
+        "claim_id": "r05-c2",
+        "text": "He proposed the theory of evolution by natural selection.",
+        "source_sentence": "He proposed the theory of evolution by natural selection.",
+        "triple": null
+      }
+    ]
+  },
+  {
+    "id": "r06",
+    "claims": [
+      {
+        "claim_id": "r06-c1",
+        "text": "Ada Lovelace wrote the first algorithm intended for a machine.",
+        "source_sentence": "Ada Lovelace wrote the first algorithm intended for a machine.",
+        "triple": null
+      },
+      {
+        "claim_id": "r06-c2",
+        "text": "She worked with Charles Babbage on the Analytical Engine and died in 1872.",
+        "source_sentence": "She worked with Charles Babbage on the Analytical Engine and died in 1872.",
+        "triple": null
+      }
+    ]
+  }
+]

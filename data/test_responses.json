@@ -1,0 +1,74 @@
+   [
+     {
+       "id": "r01",
+       "question": "Where was Marie Curie born and what did she win?",
+       "response": "Marie Curie was born in Warsaw. She won two Nobel Prizes, one in Physics and one in Chemistry.",
+       "gold_claims": [
+         "Marie Curie was born in Warsaw.",
+         "Marie Curie won two Nobel Prizes.",
+         "Marie Curie won a Nobel Prize in Physics.",
+         "Marie Curie won a Nobel Prize in Chemistry."
+       ],
+       "planted_errors": [],
+       "tests": "pronoun + list split"
+     },
+     {
+       "id": "r02",
+       "question": "Tell me about Albert Einstein's origins.",
+       "response": "Albert Einstein, who developed the theory of relativity, was born in Ulm in 1879.",
+       "gold_claims": [
+         "Albert Einstein developed the theory of relativity.",
+         "Albert Einstein was born in Ulm.",
+         "Albert Einstein was born in 1879."
+       ],
+       "planted_errors": [],
+       "tests": "relative clause + date"
+     },
+     {
+       "id": "r03",
+       "question": "What is Isaac Newton known for?",
+       "response": "Isaac Newton formulated the laws of motion and was born in London.",
+       "gold_claims": [
+         "Isaac Newton formulated the laws of motion.",
+         "Isaac Newton was born in London."
+       ],
+       "planted_errors": ["Isaac Newton was born in London."],
+       "tests": "and-split + planted error"
+     },
+     {
+       "id": "r04",
+       "question": "Who was Pierre Curie?",
+       "response": "Pierre Curie was a French physicist. He married Marie Curie in 1895, and together they discovered polonium.",
+       "gold_claims": [
+         "Pierre Curie was a French physicist.",
+         "Pierre Curie married Marie Curie.",
+         "Pierre Curie married Marie Curie in 1895.",
+         "Pierre Curie and Marie Curie discovered polonium."
+       ],
+       "planted_errors": [],
+       "tests": "pronoun chain + 'they'"
+     },
+     {
+       "id": "r05",
+       "question": "Why is Charles Darwin important?",
+       "response": "Charles Darwin is arguably the most influential biologist ever. He proposed the theory of evolution by natural selection.",
+       "gold_claims": [
+         "Charles Darwin proposed the theory of evolution by natural selection."
+       ],
+       "planted_errors": [],
+       "tests": "opinion must be skipped"
+     },
+     {
+       "id": "r06",
+       "question": "What did Ada Lovelace do?",
+       "response": "Ada Lovelace wrote the first algorithm intended for a machine. She worked with Charles Babbage on the Analytical Engine and died in 1872.",
+       "gold_claims": [
+         "Ada Lovelace wrote the first algorithm intended for a machine.",
+         "Ada Lovelace worked with Charles Babbage.",
+         "Ada Lovelace worked on the Analytical Engine.",
+         "Ada Lovelace died in 1872."
+       ],
+       "planted_errors": ["Ada Lovelace died in 1872."],
+       "tests": "3 entities in one sentence + planted error"
+     }
+   ]

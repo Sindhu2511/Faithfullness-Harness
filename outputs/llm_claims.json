@@ -1,0 +1,224 @@
+[
+  {
+    "id": "r01",
+    "claims": [
+      {
+        "claim_id": "r01-c1",
+        "text": "Marie Curie was born in Warsaw.",
+        "source_sentence": "Marie Curie was born in Warsaw.",
+        "triple": [
+          "Marie Curie",
+          "born_in",
+          "Warsaw"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r01-c2",
+        "text": "Marie Curie won a Nobel Prize in Physics.",
+        "source_sentence": "She won two Nobel Prizes, one in Physics and one in Chemistry.",
+        "triple": [
+          "Marie Curie",
+          "won",
+          "Nobel Prize in Physics"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r01-c3",
+        "text": "Marie Curie won a Nobel Prize in Chemistry.",
+        "source_sentence": "She won two Nobel Prizes, one in Physics and one in Chemistry.",
+        "triple": [
+          "Marie Curie",
+          "won",
+          "Nobel Prize in Chemistry"
+        ],
+        "triple_issues": []
+      }
+    ],
+    "retried": false,
+    "error": null
+  },
+  {
+    "id": "r02",
+    "claims": [
+      {
+        "claim_id": "r02-c1",
+        "text": "Albert Einstein developed the theory of relativity.",
+        "source_sentence": "Albert Einstein, who developed the theory of relativity, was born in Ulm in 1879.",
+        "triple": [
+          "Albert Einstein",
+          "developed",
+          "the theory of relativity"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r02-c2",
+        "text": "Albert Einstein was born in Ulm.",
+        "source_sentence": "Albert Einstein, who developed the theory of relativity, was born in Ulm in 1879.",
+        "triple": [
+          "Albert Einstein",
+          "born_in",
+          "Ulm"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r02-c3",
+        "text": "Albert Einstein was born in 1879.",
+        "source_sentence": "Albert Einstein, who developed the theory of relativity, was born in Ulm in 1879.",
+        "triple": [
+          "Albert Einstein",
+          "born_in_year",
+          "1879"
+        ],
+        "triple_issues": []
+      }
+    ],
+    "retried": false,
+    "error": null
+  },
+  {
+    "id": "r03",
+    "claims": [
+      {
+        "claim_id": "r03-c1",
+        "text": "Isaac Newton formulated the laws of motion.",
+        "source_sentence": "Isaac Newton formulated the laws of motion and was born in London.",
+        "triple": [
+          "Isaac Newton",
+          "formulated",
+          "the laws of motion"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r03-c2",
+        "text": "Isaac Newton was born in London.",
+        "source_sentence": "Isaac Newton formulated the laws of motion and was born in London.",
+        "triple": [
+          "Isaac Newton",
+          "born_in",
+          "London"
+        ],
+        "triple_issues": []
+      }
+    ],
+    "retried": false,
+    "error": null
+  },
+  {
+    "id": "r04",
+    "claims": [
+      {
+        "claim_id": "r04-c1",
+        "text": "Pierre Curie was a French physicist.",
+        "source_sentence": "Pierre Curie was a French physicist.",
+        "triple": [
+          "Pierre Curie",
+          "was",
+          "French physicist"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r04-c2",
+        "text": "Pierre Curie married Marie Curie.",
+        "source_sentence": "He married Marie Curie in 1895",
+        "triple": [
+          "Pierre Curie",
+          "married",
+          "Marie Curie"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r04-c3",
+        "text": "Pierre Curie married Marie Curie in 1895.",
+        "source_sentence": "He married Marie Curie in 1895",
+        "triple": [
+          "Pierre Curie",
+          "married_in_year",
+          "1895"
+        ],
+        "triple_issues": [
+          "year repaired from claim text"
+        ]
+      },
+      {
+        "claim_id": "r04-c4",
+        "text": "Pierre Curie and Marie Curie discovered polonium.",
+        "source_sentence": "and together they discovered polonium.",
+        "triple": [
+          "Pierre Curie and Marie Curie",
+          "discovered",
+          "polonium"
+        ],
+        "triple_issues": [
+          "compound subject"
+        ]
+      }
+    ],
+    "retried": false,
+    "error": null
+  },
+  {
+    "id": "r05",
+    "claims": [
+      {
+        "claim_id": "r05-c1",
+        "text": "Charles Darwin proposed the theory of evolution by natural selection.",
+        "source_sentence": "He proposed the theory of evolution by natural selection.",
+        "triple": [
+          "Charles Darwin",
+          "proposed",
+          "the theory of evolution by natural selection"
+        ],
+        "triple_issues": []
+      }
+    ],
+    "retried": false,
+    "error": null
+  },
+  {
+    "id": "r06",
+    "claims": [
+      {
+        "claim_id": "r06-c1",
+        "text": "Ada Lovelace wrote the first algorithm intended for a machine.",
+        "source_sentence": "Ada Lovelace wrote the first algorithm intended for a machine.",
+        "triple": [
+          "Ada Lovelace",
+          "wrote",
+          "the first algorithm intended for a machine"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r06-c2",
+        "text": "Ada Lovelace worked with Charles Babbage on the Analytical Engine.",
+        "source_sentence": "She worked with Charles Babbage on the Analytical Engine",
+        "triple": [
+          "Ada Lovelace",
+          "worked_with",
+          "Charles Babbage on the Analytical Engine"
+        ],
+        "triple_issues": []
+      },
+      {
+        "claim_id": "r06-c3",
+        "text": "Ada Lovelace died in 1872.",
+        "source_sentence": "and died in 1872.",
+        "triple": [
+          "Ada Lovelace",
+          "died_in_year",
+          "1872"
+        ],
+        "triple_issues": []
+      }
+    ],
+    "retried": false,
+    "error": null
+  }
+]

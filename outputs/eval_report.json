@@ -1,0 +1,54 @@
+{
+  "baseline": {
+    "scores": {
+      "predicted": 10,
+      "gold": 18,
+      "matched": 4,
+      "precision": 0.4,
+      "recall": 0.22,
+      "f1": 0.29,
+      "planted_errors_kept": "0/2",
+      "pronoun_leaks": 4
+    },
+    "notes": [
+      "r01 MISSED: Marie Curie won two Nobel Prizes.",
+      "r01 MISSED: Marie Curie won a Nobel Prize in Physics.",
+      "r01 MISSED: Marie Curie won a Nobel Prize in Chemistry.",
+      "r01 EXTRA:  She won two Nobel Prizes, one in Physics and one in Chemistry.",
+      "r02 MISSED: Albert Einstein developed the theory of relativity.",
+      "r02 MISSED: Albert Einstein was born in Ulm.",
+      "r02 MISSED: Albert Einstein was born in 1879.",
+      "r02 EXTRA:  Albert Einstein, who developed the theory of relativity, was born in Ulm in 1879.",
+      "r03 MISSED: Isaac Newton formulated the laws of motion.",
+      "r03 MISSED: Isaac Newton was born in London.",
+      "r03 EXTRA:  Isaac Newton formulated the laws of motion and was born in London.",
+      "r04 MISSED: Pierre Curie married Marie Curie.",
+      "r04 MISSED: Pierre Curie married Marie Curie in 1895.",
+      "r04 MISSED: Pierre Curie and Marie Curie discovered polonium.",
+      "r04 EXTRA:  He married Marie Curie in 1895, and together they discovered polonium.",
+      "r05 EXTRA:  Charles Darwin is arguably the most influential biologist ever.",
+      "r06 MISSED: Ada Lovelace worked with Charles Babbage.",
+      "r06 MISSED: Ada Lovelace worked on the Analytical Engine.",
+      "r06 MISSED: Ada Lovelace died in 1872.",
+      "r06 EXTRA:  She worked with Charles Babbage on the Analytical Engine and died in 1872."
+    ]
+  },
+  "llm": {
+    "scores": {
+      "predicted": 16,
+      "gold": 18,
+      "matched": 15,
+      "precision": 0.94,
+      "recall": 0.83,
+      "f1": 0.88,
+      "planted_errors_kept": "2/2",
+      "pronoun_leaks": 0
+    },
+    "notes": [
+      "r01 MISSED: Marie Curie won two Nobel Prizes.",
+      "r06 MISSED: Ada Lovelace worked with Charles Babbage.",
+      "r06 MISSED: Ada Lovelace worked on the Analytical Engine.",
+      "r06 EXTRA:  Ada Lovelace worked with Charles Babbage on the Analytical Engine."
+    ]
+  }
+}
