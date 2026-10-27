@@ -53,7 +53,7 @@ from it. See [docs/decisions.md](docs/decisions.md), D1.
 
 | Phase | Task | Status |
 |-------|------|--------|
-| Phase A Taxonomy | A1-A3 definitions, examples, triple changes | Drafted ([docs/taxonomy.md](docs/taxonomy.md)) |
+| Phase A Taxonomy | A1-A3 definitions, examples, triple changes | Drafted, example facts verified ([docs/taxonomy.md](docs/taxonomy.md)) |
 | Phase A | A4 comparison with GraphEval, RefChecker, GGA | Done ([docs/taxonomy.md](docs/taxonomy.md) section 6) |
 | Phase A | A5 guide sign-off | Pending |
 | Phase B Source answers | B1-B2 question selection (300 questions, 75 per type) | Done |
@@ -63,7 +63,9 @@ from it. See [docs/decisions.md](docs/decisions.md), D1.
 | Phase C Error injection | C1-C3 injectors for all 5 error types (relation reversal, entity swap, wrong relation, fabricated fact, broken chain) with taxonomy-consistency check | Scripts done, self-test 22 cases, waiting for pilot |
 | Phase C | C4 spot-check sheet | Script done (spotcheck.csv), human review pending |
 | Phase C | C5 balancing per error type plus clean samples | Script done, self-test 6 cases, waiting for pilot |
-| Phase D Human-annotated set | D1-D5 | Not started |
+| Phase D Human-annotated set | D1 sample about 100 real answers, D3 one sheet per annotator | Script done, self-test 6 cases, waiting for full run |
+| Phase D | D2 labelling guide | Done ([docs/annotation_guideline.md](docs/annotation_guideline.md)) |
+| Phase D | D4 agreement (Cohen's kappa), D5 adjudication and final labels | Script done, self-test 8 cases, waiting for annotations |
 | Phase E Packaging | E1 fixed schema | Done ([docs/benchmark_schema.md](docs/benchmark_schema.md)) |
 | Phase E | E2 dev/test split by question | Script done, waiting for pilot |
 | Phase E | E3 README stats table | Pending (after full run) |
@@ -94,7 +96,8 @@ faithfulness-harness/
 │   ├── objective1_plan.md          # plan for the claim-extraction prototype
 │   ├── taxonomy.md                 # hallucination taxonomy and comparison with existing work
 │   ├── decisions.md                # design decisions (D1: source of edge direction)
-│   └── benchmark_schema.md         # fixed benchmark sample schema, verdicts, split method
+│   ├── benchmark_schema.md         # fixed benchmark sample schema, verdicts, split method
+│   └── annotation_guideline.md     # labelling guide for human annotators
 ├── src/
 │   ├── baseline.py                 # spaCy baseline: one sentence = one claim
 │   ├── extractor.py                # LLM extractor: atomic claims + triples via Ollama
@@ -107,13 +110,16 @@ faithfulness-harness/
 │       ├── entities.py             # entity normalisation, reference graph, path search
 │       ├── map_sentences.py        # B5: map answer sentences to gold edges and paths
 │       ├── inject_errors.py        # C1-C3: plant the 5 error types into correct answers
-│       └── build_benchmark.py      # C4-C5, E1-E2: balance, split by question, spot-check sheet
+│       ├── build_benchmark.py      # C4-C5, E1-E2: balance, split by question, spot-check sheet
+│       ├── make_annotation_set.py  # D1, D3: sample real answers, one sheet per annotator
+│       └── annotation_agreement.py # D4-D5: Cohen's kappa, disagreements, final labels
 ├── outputs/
 │   ├── baseline_claims.json        # prototype: baseline claims
 │   ├── llm_claims.json             # prototype: LLM extractor claims
 │   ├── eval_report.json            # prototype: evaluation report
 │   ├── lightrag/<run-name>/        # created by the pipeline (answers, judged, mapped, summaries)
-│   └── benchmark/<run-name>/       # created by the pipeline (injected, dev/test, spot-check)
+│   ├── benchmark/<run-name>/       # created by the pipeline (injected, dev/test, spot-check)
+│   └── annotation/<run-name>/      # created by the pipeline (sheets, agreement, final labels)
 ├── pyproject.toml
 └── uv.lock
 ```
@@ -353,6 +359,7 @@ uv run python src/rag/filter_correct.py
 uv run python src/rag/map_sentences.py
 uv run python src/rag/inject_errors.py
 uv run python src/rag/build_benchmark.py
+uv run python src/rag/make_annotation_set.py
 ```
 
 Full run (300 questions):
@@ -364,7 +371,93 @@ uv run python src/rag/filter_correct.py --run-name full
 uv run python src/rag/map_sentences.py --run-name full
 uv run python src/rag/inject_errors.py --run-name full
 uv run python src/rag/build_benchmark.py --run-name full
+uv run python src/rag/make_annotation_set.py --run-name full
 ```
+
+### 10.8 Create the annotation set
+
+Purpose: sample about 100 real LightRAG answers and write one identical labelling sheet per
+annotator (tasks D1, D3). Only real (not injected) answers are used, because this set measures
+how well the verifier handles natural errors, which injection cannot reproduce. Each sheet row is
+one answer sentence. The automatic correct/incorrect label and the sentence-to-edge mapping are
+hidden from annotators so that their labels are independent of the pipeline. Labelling rules:
+[docs/annotation_guideline.md](docs/annotation_guideline.md).
+
+```powershell
+uv run python src/rag/make_annotation_set.py --self-test
+uv run python src/rag/make_annotation_set.py --run-name full
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--run-name` | `pilot` | Run folder under `outputs/lightrag/` (input) and `outputs/annotation/` (output) |
+| `--n` | `100` | Number of answers to sample |
+| `--incorrect-share` | `0.6` | Target share of answers labelled incorrect or needs_review |
+| `--annotators` | `A,B` | Comma list of annotator names; one sheet each |
+| `--seed` | `42` | Random seed |
+| `--self-test` | off | Run built-in cases and exit |
+
+Answers are spread as evenly as possible over the four question types; rows labelled error are
+skipped.
+
+- Input: `outputs/lightrag/<run-name>/mapped.jsonl`; `outputs/benchmark/<run-name>/benchmark_dev.jsonl`
+  and `benchmark_test.jsonl` if present (to record each answer's split).
+- Output, in `outputs/annotation/<run-name>/`: `sheet_<name>.csv` per annotator,
+  `annotation_items.jsonl`, `annotation_summary.json`.
+
+Results: no annotation done yet.
+
+### 10.9 Measure agreement and finalise labels
+
+Purpose: compare the two annotators' sheets, measure agreement with Cohen's kappa, list
+disagreements and merge everything into final labels (tasks D4-D5).
+
+```powershell
+uv run python src/rag/annotation_agreement.py --self-test
+uv run python src/rag/annotation_agreement.py --run-name full
+uv run python src/rag/annotation_agreement.py --run-name full --adjudicated outputs/annotation/full/disagreements.csv
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--run-name` | `pilot` | Run folder under `outputs/annotation/` |
+| `--annotators` | `A,B` | Exactly two annotator names |
+| `--adjudicated` | none | Filled disagreements CSV with the final labels |
+| `--self-test` | off | Run built-in cases and exit |
+
+Workflow:
+1. Each annotator fills their own `sheet_<name>.csv` separately, following
+   [docs/annotation_guideline.md](docs/annotation_guideline.md).
+2. First run (without `--adjudicated`): reports raw agreement and Cohen's kappa for verdict,
+   error_type and a binary hallucinated label, plus a verdict confusion matrix, and writes
+   `disagreements.csv`.
+3. A third person fills `final_verdict`, `final_error_type` and `final_evidence_edges` in
+   `disagreements.csv` (values already filled are kept when the file is rewritten).
+4. Second run with `--adjudicated`: writes `final_labels.jsonl` (agreed plus adjudicated
+   sentences) and `final_answers.jsonl` (answers whose sentences are all resolved, with a
+   faithfulness score).
+
+Kappa bands (Landis and Koch):
+
+| Kappa | Band |
+|-------|------|
+| below 0.00 | poor |
+| 0.00-0.20 | slight |
+| 0.21-0.40 | fair |
+| 0.41-0.60 | moderate |
+| 0.61-0.80 | substantial |
+| 0.81-1.00 | almost perfect |
+
+The target is kappa 0.6 or higher. Rows with invalid labels (for example verdict contradicted
+with error_type none) are listed in `agreement_summary.json` under `invalid_rows`, are left out of
+agreement and final labels, and must be fixed in the annotator's sheet before rerunning.
+
+- Input, in `outputs/annotation/<run-name>/`: `sheet_<A>.csv`, `sheet_<B>.csv`,
+  `annotation_items.jsonl`; optionally the filled `disagreements.csv`.
+- Output, in `outputs/annotation/<run-name>/`: `disagreements.csv`, `final_labels.jsonl`,
+  `final_answers.jsonl`, `agreement_summary.json`.
+
+Results: no annotation done yet.
 
 ## 11. Self-tests
 
@@ -373,6 +466,8 @@ uv run python src/rag/filter_correct.py --self-test
 uv run python src/rag/map_sentences.py --self-test
 uv run python src/rag/inject_errors.py --self-test
 uv run python src/rag/build_benchmark.py --self-test
+uv run python src/rag/make_annotation_set.py --self-test
+uv run python src/rag/annotation_agreement.py --self-test
 ```
 
 Each case prints `PASS` or `FAIL`, followed by a total line. Passing looks like:
@@ -383,6 +478,8 @@ Each case prints `PASS` or `FAIL`, followed by a total line. Passing looks like:
 | `map_sentences.py` | `9/9 passed` |
 | `inject_errors.py` | `22/22 passed` |
 | `build_benchmark.py` | `6/6 passed` |
+| `make_annotation_set.py` | `6/6 passed` |
+| `annotation_agreement.py` | `8/8 passed` |
 
 Passing exits with code 0; any failure gives exit code 1. None of the self-tests needs Ollama or
 the dataset.
@@ -439,6 +536,8 @@ Limitations of the prototype:
   ([docs/decisions.md](docs/decisions.md), D1), not world knowledge.
 - The verifier (Objective 2) will need to treat inverse relations (father/mother and child) as
   equivalent.
+- The pilot run is too small for real annotation (about 20 answers); annotators should label the
+  full run.
 
 ## 14. References
 
