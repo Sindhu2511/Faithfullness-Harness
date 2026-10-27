@@ -60,9 +60,13 @@ from it. See [docs/decisions.md](docs/decisions.md), D1.
 | Phase B | B3 LightRAG answers | Script done, 20-question pilot in progress |
 | Phase B | B4 correct-answer filter | Script done, self-test passing, waiting for pilot |
 | Phase B | B5 sentence-to-edge mapping | Script done, self-test passing (9/9), waiting for pilot |
-| Phase C Error injection | C1-C5 | Not started |
+| Phase C Error injection | C1-C3 injectors for all 5 error types (relation reversal, entity swap, wrong relation, fabricated fact, broken chain) with taxonomy-consistency check | Scripts done, self-test 22 cases, waiting for pilot |
+| Phase C | C4 spot-check sheet | Script done (spotcheck.csv), human review pending |
+| Phase C | C5 balancing per error type plus clean samples | Script done, self-test 6 cases, waiting for pilot |
 | Phase D Human-annotated set | D1-D5 | Not started |
-| Phase E Packaging | E1-E3 | Not started |
+| Phase E Packaging | E1 fixed schema | Done ([docs/benchmark_schema.md](docs/benchmark_schema.md)) |
+| Phase E | E2 dev/test split by question | Script done, waiting for pilot |
+| Phase E | E3 README stats table | Pending (after full run) |
 | Objectives 2-4 | Verifier, diagnosis, evaluation | Not started |
 
 ## 7. Key design decisions
@@ -89,7 +93,8 @@ faithfulness-harness/
 ├── docs/
 │   ├── objective1_plan.md          # plan for the claim-extraction prototype
 │   ├── taxonomy.md                 # hallucination taxonomy and comparison with existing work
-│   └── decisions.md                # design decisions (D1: source of edge direction)
+│   ├── decisions.md                # design decisions (D1: source of edge direction)
+│   └── benchmark_schema.md         # fixed benchmark sample schema, verdicts, split method
 ├── src/
 │   ├── baseline.py                 # spaCy baseline: one sentence = one claim
 │   ├── extractor.py                # LLM extractor: atomic claims + triples via Ollama
@@ -100,12 +105,15 @@ faithfulness-harness/
 │       ├── run_lightrag.py         # B3: LightRAG answers + retrieved subgraph per question
 │       ├── filter_correct.py       # B4: judge answers against gold, split correct/incorrect
 │       ├── entities.py             # entity normalisation, reference graph, path search
-│       └── map_sentences.py        # B5: map answer sentences to gold edges and paths
+│       ├── map_sentences.py        # B5: map answer sentences to gold edges and paths
+│       ├── inject_errors.py        # C1-C3: plant the 5 error types into correct answers
+│       └── build_benchmark.py      # C4-C5, E1-E2: balance, split by question, spot-check sheet
 ├── outputs/
 │   ├── baseline_claims.json        # prototype: baseline claims
 │   ├── llm_claims.json             # prototype: LLM extractor claims
 │   ├── eval_report.json            # prototype: evaluation report
-│   └── lightrag/<run-name>/        # created by the pipeline (answers, judged, mapped, summaries)
+│   ├── lightrag/<run-name>/        # created by the pipeline (answers, judged, mapped, summaries)
+│   └── benchmark/<run-name>/       # created by the pipeline (injected, dev/test, spot-check)
 ├── pyproject.toml
 └── uv.lock
 ```
@@ -252,16 +260,132 @@ uv run python src/rag/map_sentences.py
 
 Results: Pilot in progress.
 
+### 10.5 Inject errors
+
+Purpose: plant known errors into answers labelled correct to build the auto-labelled benchmark
+(tasks C1-C3). Every candidate is kept only if its new triple classifies as its own error type
+under [docs/taxonomy.md](docs/taxonomy.md) rules and decision order; at most one sample per type
+per answer.
+
+```powershell
+uv run python src/rag/inject_errors.py --self-test
+uv run python src/rag/inject_errors.py
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--run-name` | `pilot` | Run folder under `outputs/lightrag/` (input) and `outputs/benchmark/` (output) |
+| `--questions` | `data/questions/questions.jsonl` | Question file (source of the entity-swap pools) |
+| `--types` | `relation_reversal,entity_swap,wrong_relation,fabricated_fact,broken_chain` | Comma list of error types to inject |
+| `--seed` | `42` | Random seed |
+| `--self-test` | off | Run built-in cases and exit |
+
+What each type changes:
+- **relation_reversal:** swaps the subject and object mentions of a stated person-to-person edge
+  (father, mother, child, doctoral advisor); symmetric relations (spouse, sibling) are never
+  reversed.
+- **entity_swap:** replaces the object of a stated edge with another object of the same relation
+  taken from all 300 questions, never an entity from this question's graph.
+- **wrong_relation:** rewrites a one-fact sentence with a template using another relation from
+  the same group (for example director to producer), keeping both entities.
+- **fabricated_fact:** inserts a new template sentence giving a mentioned entity a relation it
+  has no edge for, with an object not in the graph; no existing sentence is changed.
+- **broken_chain:** in a sentence that implies a multi-hop path without naming the middle
+  entity, replaces the end of the path with the last-hop object of a different intermediate
+  entity (or, failing that, a pool object).
+
+Skip reasons reported per type: `no_direct_edge`, `relation_not_reversible`, `span_not_found`,
+`span_overlap`, `empty_pool`, `multi_fact_sentence`, `relation_not_groupable`, `unknown_kind`,
+`no_mentioned_entity`, `no_path_sentence`, `no_replacement`, `invalid`, `taxonomy_mismatch`,
+`no_valid_candidate`.
+
+- Input: `outputs/lightrag/<run-name>/mapped.jsonl` (rows labelled correct),
+  `data/questions/questions.jsonl`.
+- Output, in `outputs/benchmark/<run-name>/`: `injected.jsonl`, `inject_summary.json`.
+
+Results: Pilot in progress.
+
+### 10.6 Build the benchmark
+
+Purpose: balance error types, add clean samples, split by question and write the fixed schema
+(tasks C4-C5, E1-E2). Field definitions: [docs/benchmark_schema.md](docs/benchmark_schema.md).
+
+```powershell
+uv run python src/rag/build_benchmark.py --self-test
+uv run python src/rag/build_benchmark.py
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--run-name` | `pilot` | Run folder |
+| `--per-type` | `0` | Samples per error type; `0` means the smallest non-zero type count |
+| `--clean-count` | `0` | Clean samples; `0` means the same as the per-type target |
+| `--dev-fraction` | `0.3` | Share of questions in the dev split |
+| `--spotcheck-per-type` | `20` | Samples per error type in the spot-check sheet |
+| `--seed` | `42` | Random seed for balancing, splitting and the spot-check |
+| `--self-test` | off | Run built-in cases and exit |
+
+- **Balancing:** each error type is sampled down to the same target. Types with 0 samples are
+  left out, and types below an explicit `--per-type` are kept in full; both are reported as
+  warnings.
+- **Clean samples:** unmodified correct answers with `error_type` `none` and `expected_verdict`
+  `supported`.
+- **Split by question:** all samples from one question go to the same split, so no question
+  appears in both dev and test. The summary records this leakage check.
+- **Spot-check review:** open `spotcheck.csv`, fill `reads_naturally` and `label_correct` for
+  each row (and `notes` if needed).
+
+- Input: `outputs/benchmark/<run-name>/injected.jsonl`, `outputs/lightrag/<run-name>/mapped.jsonl`
+  (and `answers.jsonl` for model names).
+- Output, in `outputs/benchmark/<run-name>/`: `benchmark_dev.jsonl`, `benchmark_test.jsonl`,
+  `spotcheck.csv`, `benchmark_summary.json`.
+
+Results: Pilot in progress.
+
+### 10.7 Full pipeline in one go
+
+Pilot (20 questions):
+
+```powershell
+uv run python src/data/prepare_questions.py
+uv run python src/rag/run_lightrag.py
+uv run python src/rag/filter_correct.py
+uv run python src/rag/map_sentences.py
+uv run python src/rag/inject_errors.py
+uv run python src/rag/build_benchmark.py
+```
+
+Full run (300 questions):
+
+```powershell
+uv run python src/data/prepare_questions.py
+uv run python src/rag/run_lightrag.py --limit 0 --run-name full
+uv run python src/rag/filter_correct.py --run-name full
+uv run python src/rag/map_sentences.py --run-name full
+uv run python src/rag/inject_errors.py --run-name full
+uv run python src/rag/build_benchmark.py --run-name full
+```
+
 ## 11. Self-tests
 
 ```powershell
 uv run python src/rag/filter_correct.py --self-test
 uv run python src/rag/map_sentences.py --self-test
+uv run python src/rag/inject_errors.py --self-test
+uv run python src/rag/build_benchmark.py --self-test
 ```
 
-Each case prints `PASS` or `FAIL`, followed by a total line. Passing looks like `10/10 passed`
-for `filter_correct.py` and `9/9 passed` for `map_sentences.py`, with exit code 0. Any failure
-gives exit code 1. Neither self-test needs Ollama or the dataset.
+Each case prints `PASS` or `FAIL`, followed by a total line. Passing looks like:
+
+| Script | Expected total line |
+|--------|---------------------|
+| `filter_correct.py` | `10/10 passed` |
+| `map_sentences.py` | `9/9 passed` |
+| `inject_errors.py` | `22/22 passed` |
+| `build_benchmark.py` | `6/6 passed` |
+
+Passing exits with code 0; any failure gives exit code 1. None of the self-tests needs Ollama or
+the dataset.
 
 ## 12. Earlier work: claim extraction prototype
 
@@ -306,6 +430,15 @@ Limitations of the prototype:
   "He was born in 1944" is not mapped to any edge.
 - The comparison-question regex in `filter_correct.py` can misread a question that has an extra
   comma before the two options.
+- Dates written in a different format from the gold triple cannot be located in the answer, so
+  entity swap and broken chain skip them (`span_not_found`).
+- Wrong relation and fabricated fact use fixed sentence templates, so the edited sentence can
+  differ in style from the rest of the answer.
+- A wrong-relation sample can occasionally be true in the real world (for example a director who
+  also produced the film). Labels are defined against the reference graph
+  ([docs/decisions.md](docs/decisions.md), D1), not world knowledge.
+- The verifier (Objective 2) will need to treat inverse relations (father/mother and child) as
+  equivalent.
 
 ## 14. References
 
