@@ -2,9 +2,10 @@
 
 Each error type (docs/taxonomy.md, section 3) is one injector function registered in INJECTORS.
 An injector looks at one mapped answer (from map_sentences.py) and returns candidate samples;
-the main loop validates them and keeps at most one sample per type per answer.
-Implemented: relation_reversal, entity_swap. To add a type, write an injector with the same
-signature and add it to INJECTORS and EXPECTED_VERDICT.
+the main loop keeps only candidates whose new triple classify_claim() puts in the intended type
+(taxonomy sections 3-4), then picks at most one sample per type per answer.
+Implemented: relation_reversal, entity_swap, wrong_relation, fabricated_fact. To add a type,
+write an injector with the same signature and add it to INJECTORS and EXPECTED_VERDICT.
 """
 import argparse
 import json
@@ -25,13 +26,86 @@ SYMMETRIC_RELATIONS = {"spouse", "sibling"}
 # Asymmetric, person to person: the only relations a reversal can apply to.
 REVERSIBLE_RELATIONS = {"father", "mother", "child", "doctoral advisor"}
 
+# Only relations in the same group may replace each other (wrong_relation), so both entities
+# still make sense. Relations in no group (country, country of origin, country of citizenship,
+# occupation, employer, publisher, founded by) are never used; "country" and
+# "country of origin" are near-synonyms, so swapping them would not be an error.
+FILM_PERSON = {"director", "producer", "composer", "performer", "editor"}
+PERSON_PERSON = {"father", "mother", "spouse", "child", "sibling", "doctoral advisor"}
+PERSON_DATE = {"date of birth", "date of death"}
+WORK_DATE = {"publication date", "inception"}
+PERSON_PLACE = {"place of birth", "place of death", "place of burial"}
+RELATION_GROUPS = {
+    "FILM_PERSON": FILM_PERSON, "PERSON_PERSON": PERSON_PERSON, "PERSON_DATE": PERSON_DATE,
+    "WORK_DATE": WORK_DATE, "PERSON_PLACE": PERSON_PLACE,
+}
+# Relations a node of each kind can be the subject of (fabricated_fact).
+KIND_RELATIONS = {
+    "work": FILM_PERSON | WORK_DATE,
+    "person": PERSON_PERSON | PERSON_DATE | PERSON_PLACE,
+}
+
+# One sentence per grouped relation; {s} is the subject, {o} the object.
+TEMPLATES = {
+    "director": "{s} was directed by {o}.",
+    "producer": "{s} was produced by {o}.",
+    "composer": "The music of {s} was composed by {o}.",
+    "performer": "{s} was performed by {o}.",
+    "editor": "{s} was edited by {o}.",
+    "father": "The father of {s} is {o}.",
+    "mother": "The mother of {s} is {o}.",
+    "spouse": "The spouse of {s} is {o}.",
+    "child": "A child of {s} is {o}.",
+    "sibling": "A sibling of {s} is {o}.",
+    "doctoral advisor": "The doctoral advisor of {s} is {o}.",
+    "date of birth": "{s} was born on {o}.",
+    "date of death": "{s} died on {o}.",
+    "publication date": "{s} was published on {o}.",
+    "inception": "{s} was founded on {o}.",
+    "place of birth": "{s} was born in {o}.",
+    "place of death": "{s} died in {o}.",
+    "place of burial": "{s} is buried in {o}.",
+}
+
 # docs/taxonomy.md, section 5.
 EXPECTED_VERDICT = {
     "relation_reversal": "contradicted",
     "entity_swap": "contradicted",
+    "wrong_relation": "contradicted",
+    "fabricated_fact": "unsupported",
 }
 
 Skips = dict[str, int]
+
+
+def group_of(relation: str) -> set[str] | None:
+    """The relation group containing `relation`, or None."""
+    return next((g for g in RELATION_GROUPS.values() if relation in g), None)
+
+
+def surface(name: str) -> str:
+    """Original spelling without a trailing disambiguator such as " (director)"."""
+    return TRAILING_PAREN_RE.sub("", name) or name
+
+
+def render(relation: str, subject: str, obj: str) -> str:
+    """Template sentence for (subject, relation, obj)."""
+    return TEMPLATES[relation].format(s=surface(subject), o=surface(obj))
+
+
+def classify_claim(triple: list[str], graph: dict) -> str:
+    """Taxonomy rules 1, 2, 3, 5 in decision order (section 4), on normalised keys."""
+    s, r, o = normalise_entity(triple[0]), triple[1], normalise_entity(triple[2])
+    edges = {(e["subject_key"], e["relation"], e["object_key"]) for e in graph["edges"]}
+    if (s, r, o) in edges:
+        return "supported"
+    if (o, r, s) in edges:
+        return "relation_reversal"
+    if any(es == s and eo == o and er != r for es, er, eo in edges):
+        return "wrong_relation"
+    if any(er == r and ((es == s and eo != o) or (eo == o and es != s)) for es, er, eo in edges):
+        return "entity_swap"
+    return "fabricated_fact"
 
 
 def find_span(sentence: str, node: dict) -> tuple[int, int] | None:
@@ -58,15 +132,33 @@ def _skip(skips: Skips, reason: str) -> None:
     skips[reason] = skips.get(reason, 0) + 1
 
 
-def _sample(row: dict, error_type: str, sentence: dict, new_text: str,
-            original: list[str], new: list[str]) -> dict:
-    """Build one sample (seed and created are added by the main loop)."""
+def _replace_sentence(row: dict, sentence: dict, new_text: str) -> str:
+    """The answer with one sentence replaced."""
     answer = row.get("answer") or ""
     if sentence["text"] in answer:
-        injected = answer.replace(sentence["text"], new_text, 1)
-    else:  # fall back to rebuilding the answer from its sentences
-        injected = " ".join(new_text if s["index"] == sentence["index"] else s["text"]
-                            for s in row["sentences"])
+        return answer.replace(sentence["text"], new_text, 1)
+    return " ".join(new_text if s["index"] == sentence["index"] else s["text"]
+                    for s in row["sentences"])
+
+
+def _insert_after(row: dict, sentence: dict, new_text: str) -> str:
+    """The answer with a new sentence inserted after `sentence`; existing text unchanged."""
+    answer = row.get("answer") or ""
+    pos = answer.find(sentence["text"])
+    if pos >= 0:
+        end = pos + len(sentence["text"])
+        return answer[:end] + " " + new_text + answer[end:]
+    parts = []
+    for s in row["sentences"]:
+        parts.append(s["text"])
+        if s["index"] == sentence["index"]:
+            parts.append(new_text)
+    return " ".join(parts)
+
+
+def _sample(row: dict, error_type: str, sentence_index: int, original_sentence: str | None,
+            new_text: str, injected: str, original: list[str] | None, new: list[str]) -> dict:
+    """Build one sample (seed and created are added by the main loop)."""
     return {
         "sample_id": f"{row['id']}__{error_type}",
         "source_id": row["id"],
@@ -75,21 +167,32 @@ def _sample(row: dict, error_type: str, sentence: dict, new_text: str,
         "gold_answer": row.get("gold_answer"),
         "error_type": error_type,
         "expected_verdict": EXPECTED_VERDICT[error_type],
-        "sentence_index": sentence["index"],
-        "original_sentence": sentence["text"],
+        "sentence_index": sentence_index,
+        "original_sentence": original_sentence,
         "new_sentence": new_text,
         "original_triple": original,
         "new_triple": new,
-        "original_answer": answer,
+        "original_answer": row.get("answer") or "",
         "injected_answer": injected,
         "reference_graph": row["reference_graph"],
     }
+
+
+def _edit_sample(row: dict, error_type: str, sentence: dict, new_text: str,
+                 original: list[str], new: list[str]) -> dict:
+    """Sample that replaces an existing sentence."""
+    return _sample(row, error_type, sentence["index"], sentence["text"], new_text,
+                   _replace_sentence(row, sentence, new_text), original, new)
 
 
 def _direct_edges(row: dict) -> list[tuple[dict, dict]]:
     """(sentence, edge) pairs for every direct edge stated by a sentence."""
     edges = {e["index"]: e for e in row["reference_graph"]["edges"]}
     return [(s, edges[i]) for s in row["sentences"] for i in s["edges"]]
+
+
+def _triple(e: dict) -> list[str]:
+    return [e["subject"], e["relation"], e["object"]]
 
 
 def inject_relation_reversal(row: dict, rng: random.Random,
@@ -114,9 +217,8 @@ def inject_relation_reversal(row: dict, rng: random.Random,
             continue
         t = sent["text"]
         new_text = t[:a0] + t[b0:b1] + t[a1:b0] + t[a0:a1] + t[b1:]
-        out.append(_sample(row, "relation_reversal", sent, new_text,
-                           [e["subject"], e["relation"], e["object"]],
-                           [e["object"], e["relation"], e["subject"]]))
+        out.append(_edit_sample(row, "relation_reversal", sent, new_text, _triple(e),
+                                [e["object"], e["relation"], e["subject"]]))
     return out, skips
 
 
@@ -141,9 +243,86 @@ def inject_entity_swap(row: dict, rng: random.Random,
         new_obj = rng.choice(options)
         t = sent["text"]
         new_text = t[:span[0]] + new_obj + t[span[1]:]
-        out.append(_sample(row, "entity_swap", sent, new_text,
-                           [e["subject"], e["relation"], e["object"]],
-                           [e["subject"], e["relation"], new_obj]))
+        out.append(_edit_sample(row, "entity_swap", sent, new_text, _triple(e),
+                                [e["subject"], e["relation"], new_obj]))
+    return out, skips
+
+
+def inject_wrong_relation(row: dict, rng: random.Random,
+                          pools: dict[str, list[str]]) -> tuple[list[dict], Skips]:
+    """Rewrite a one-fact sentence with another relation from the same group."""
+    out, skips = [], {}
+    edges = {e["index"]: e for e in row["reference_graph"]["edges"]}
+    with_edges = [s for s in row["sentences"] if s["edges"]]
+    if not with_edges:
+        _skip(skips, "no_direct_edge")
+    for sent in with_edges:
+        # Replacing the whole sentence must not delete other facts.
+        if len(sent["edges"]) != 1 or sent["paths"]:
+            _skip(skips, "multi_fact_sentence")
+            continue
+        e = edges[sent["edges"][0]]
+        group = group_of(e["relation"])
+        if group is None:
+            _skip(skips, "relation_not_groupable")
+            continue
+        # One candidate per alternative relation; the main loop picks among the valid ones.
+        for r_new in sorted(group - {e["relation"]}):
+            out.append(_edit_sample(row, "wrong_relation", sent,
+                                    render(r_new, e["subject"], e["object"]), _triple(e),
+                                    [e["subject"], r_new, e["object"]]))
+    return out, skips
+
+
+def node_kinds(graph: dict) -> dict[str, str]:
+    """Infer "work" or "person" per node key from its edges; conflicting or no evidence is omitted."""
+    seen: dict[str, set[str]] = {}
+    for e in graph["edges"]:
+        r, s, o = e["relation"], e["subject_key"], e["object_key"]
+        if r in FILM_PERSON or r in WORK_DATE:
+            seen.setdefault(s, set()).add("work")
+        if r in PERSON_PERSON:
+            seen.setdefault(s, set()).add("person")
+            seen.setdefault(o, set()).add("person")
+        if r in FILM_PERSON:
+            seen.setdefault(o, set()).add("person")
+        if r in PERSON_DATE or r in PERSON_PLACE:
+            seen.setdefault(s, set()).add("person")
+    return {k: next(iter(v)) for k, v in seen.items() if len(v) == 1}
+
+
+def inject_fabricated_fact(row: dict, rng: random.Random,
+                           pools: dict[str, list[str]]) -> tuple[list[dict], Skips]:
+    """Insert a new sentence stating a relation the subject has no edge for in the graph."""
+    graph, out, skips = row["reference_graph"], [], {}
+    graph_keys = {n["key"] for n in graph["nodes"]}
+    kinds = node_kinds(graph)
+    has_rel = {(e["subject_key"], e["relation"]) for e in graph["edges"]}
+    done: set[str] = set()
+    for sent in row["sentences"]:
+        for key in sent["mentioned"]:
+            if key in done:
+                continue  # insert after the first sentence that mentions the node
+            done.add(key)
+            kind = kinds.get(key)
+            if kind is None:
+                _skip(skips, "unknown_kind")
+                continue
+            subject = _node(graph, key)["names"][0]
+            for r_new in sorted(KIND_RELATIONS[kind]):
+                if (key, r_new) in has_rel:
+                    continue  # an existing edge would make this an entity swap
+                options = [o for o in pools.get(r_new, []) if normalise_entity(o) not in graph_keys]
+                if not options:
+                    _skip(skips, "empty_pool")
+                    continue
+                o_new = rng.choice(options)
+                new_text = render(r_new, subject, o_new)
+                out.append(_sample(row, "fabricated_fact", sent["index"] + 1, None, new_text,
+                                   _insert_after(row, sent, new_text), None,
+                                   [subject, r_new, o_new]))
+    if not done:
+        _skip(skips, "no_mentioned_entity")
     return out, skips
 
 
@@ -151,15 +330,23 @@ Injector = Callable[[dict, random.Random, dict[str, list[str]]], tuple[list[dict
 INJECTORS: dict[str, Injector] = {
     "relation_reversal": inject_relation_reversal,
     "entity_swap": inject_entity_swap,
+    "wrong_relation": inject_wrong_relation,
+    "fabricated_fact": inject_fabricated_fact,
 }
 
 
+def validation_error(sample: dict, graph: dict) -> str | None:
+    """None if valid; else "invalid" (sentence unchanged) or "taxonomy_mismatch"."""
+    if sample["new_sentence"] == sample["original_sentence"]:
+        return "invalid"
+    if classify_claim(sample["new_triple"], graph) != sample["error_type"]:
+        return "taxonomy_mismatch"
+    return None
+
+
 def validate(sample: dict, graph: dict) -> bool:
-    """New triple must not be a gold edge (normalised keys) and the sentence must change."""
-    s, r, o = sample["new_triple"]
-    existing = {(e["subject_key"], e["relation"], e["object_key"]) for e in graph["edges"]}
-    return ((normalise_entity(s), r, normalise_entity(o)) not in existing
-            and sample["new_sentence"] != sample["original_sentence"])
+    """A sample is valid only if its new triple classifies as its own error type."""
+    return validation_error(sample, graph) is None
 
 
 def build_pools(questions: list[dict]) -> dict[str, list[str]]:
@@ -180,10 +367,11 @@ def inject_row(row: dict, error_type: str, seed: int, pools: dict[str, list[str]
         skips[reason] = skips.get(reason, 0) + n
     valid = []
     for c in candidates:
-        if validate(c, row["reference_graph"]):
+        reason = validation_error(c, row["reference_graph"])
+        if reason is None:
             valid.append(c)
         else:
-            _skip(skips, "invalid")
+            _skip(skips, reason)
     return (rng.choice(valid) if valid else None), len(valid)
 
 
@@ -219,6 +407,32 @@ def run_self_test() -> None:
     other_order = make_row([["Anne Smith", "date of birth", "May 1, 1950"]],
                            "Anne Smith was born on 1 May 1950.")
     nf_samples, nf_skips = inject_entity_swap(other_order, random.Random(1), pools)
+
+    # classify_claim
+    fam = build_reference_graph([["Anne Smith", "father", "John Smith"],
+                                 ["Mary Smith", "father", "Anne Smith"]])
+    # wrong_relation
+    film_ev = [["To Sleep with Anger", "director", "Charles Burnett"],
+               ["Charles Burnett (director)", "date of birth", "April 13, 1944"]]
+    wr_row = make_row(film_ev[:1], "To Sleep with Anger was directed by Charles Burnett.")
+    wr, _ = inject_row(wr_row, "wrong_relation", 42, {}, {})
+    country, c_skips = inject_wrong_relation(
+        make_row([["Some Film", "country", "France"]], "Some Film is from France."),
+        random.Random(1), {})
+    multi, m_skips = inject_wrong_relation(
+        make_row([["Anne Smith", "father", "John Smith"], ["Anne Smith", "mother", "Mary Jones"]],
+                 "Anne Smith's parents are John Smith and Mary Jones."),
+        random.Random(1), {})
+    # fabricated_fact
+    fab_row = make_row(film_ev, "To Sleep with Anger was directed by Charles Burnett. "
+                                "Charles Burnett was born on April 13, 1944.")
+    fab_pools = {"producer": ["Jane Roe"], "date of death": ["May 5, 2000"]}
+    fab, _ = inject_row(fab_row, "fabricated_fact", 42, fab_pools, {})
+    # taxonomy mismatch: entity swap whose new object makes the claim a reversal
+    mismatch = {"error_type": "entity_swap", "original_sentence": "Anne Smith's father is John Smith.",
+                "new_sentence": "Anne Smith's father is Mary Smith.",
+                "new_triple": ["Anne Smith", "father", "Mary Smith"]}
+
     cases = [
         ("reversal sentence", rev_s is not None
          and rev_s["new_sentence"] == "John Smith's father is Anne Smith."),
@@ -234,6 +448,29 @@ def run_self_test() -> None:
          and not validate(existing, dob["reference_graph"])),
         ("span_not_found", other_order["sentences"][0]["edges"] == [0] and nf_samples == []
          and nf_skips.get("span_not_found") == 1),
+        ("classify supported",
+         classify_claim(["Anne Smith", "father", "John Smith"], fam) == "supported"),
+        ("classify reversal",
+         classify_claim(["John Smith", "father", "Anne Smith"], fam) == "relation_reversal"),
+        ("classify wrong relation",
+         classify_claim(["Anne Smith", "mother", "John Smith"], fam) == "wrong_relation"),
+        ("classify entity swap",
+         classify_claim(["Anne Smith", "father", "Bob Lee"], fam) == "entity_swap"),
+        ("classify fabricated",
+         classify_claim(["Some Film", "director", "Jane Doe"], fam) == "fabricated_fact"),
+        ("wrong relation same group", wr is not None
+         and wr["new_triple"][1] in FILM_PERSON - {"director"}
+         and "To Sleep with Anger" in wr["new_sentence"]
+         and "Charles Burnett" in wr["new_sentence"]),
+        ("no wrong relation for country", country == []
+         and c_skips.get("relation_not_groupable") == 1),
+        ("multi_fact_sentence", multi == [] and m_skips.get("multi_fact_sentence") == 1),
+        ("fabricated inserts sentence", fab is not None and fab["original_sentence"] is None
+         and all(s["text"] in fab["injected_answer"] for s in fab_row["sentences"])
+         and fab["new_sentence"] in fab["injected_answer"]
+         and len(fab["injected_answer"]) == len(fab_row["answer"]) + len(fab["new_sentence"]) + 1
+         and classify_claim(fab["new_triple"], fab_row["reference_graph"]) == "fabricated_fact"),
+        ("taxonomy_mismatch", validation_error(mismatch, fam) == "taxonomy_mismatch"),
     ]
     failed = 0
     for name, ok in cases:
@@ -248,7 +485,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run-name", default="pilot")
     parser.add_argument("--questions", type=Path, default=Path("data/questions/questions.jsonl"))
-    parser.add_argument("--types", default="relation_reversal,entity_swap")
+    parser.add_argument("--types",
+                        default="relation_reversal,entity_swap,wrong_relation,fabricated_fact")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
@@ -296,6 +534,7 @@ def main() -> None:
         "skips_per_type": {t: dict(sorted(s.items())) for t, s in skips.items()},
         "symmetric_relations": sorted(SYMMETRIC_RELATIONS),
         "reversible_relations": sorted(REVERSIBLE_RELATIONS),
+        "relation_groups": {g: sorted(rels) for g, rels in RELATION_GROUPS.items()},
         "seed": args.seed,
         "created": created,
     }
@@ -305,7 +544,7 @@ def main() -> None:
     print(f"Correct rows read: {len(rows)} from {mapped_path}")
     for t in types:
         print(f"  {t:<20} samples={per_type[t]}  valid candidates={candidates[t]}  "
-              f"skips={skips[t]}")
+              f"skips={dict(sorted(skips[t].items()))}")
     print(f"Symmetric: {sorted(SYMMETRIC_RELATIONS)}")
     print(f"Reversible: {sorted(REVERSIBLE_RELATIONS)}")
     print(f"Saved -> {out_dir / 'injected.jsonl'}")
