@@ -1,0 +1,17 @@
+{
+  "total": 300,
+  "per_type": {
+    "bridge_comparison": 75,
+    "comparison": 75,
+    "compositional": 75,
+    "inference": 75
+  },
+  "rows_before_filter": 12576,
+  "rows_after_filter": 12576,
+  "seed": 42,
+  "split": "validation",
+  "min_evidences": 2,
+  "source_repo_id": "framolfese/2WikiMultihopQA",
+  "notes": [],
+  "created": "2026-10-27"
+}

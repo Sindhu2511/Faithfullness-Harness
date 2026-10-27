@@ -5,8 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "datasets>=5.1.0",
     "en-core-web-sm",
+    "huggingface-hub>=2.2.0",
     "langchain-ollama>=1.1.0",
+    "lightrag-hku>=1.5.7",
+    "ollama>=0.6.3",
+    "pandas>=3.0.6",
+    "pyarrow>=26.0.0",
     "pydantic>=2.14.1",
     "spacy>=3.8.16",
 ]
