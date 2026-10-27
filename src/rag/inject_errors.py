@@ -4,12 +4,14 @@ Each error type (docs/taxonomy.md, section 3) is one injector function registere
 An injector looks at one mapped answer (from map_sentences.py) and returns candidate samples;
 the main loop keeps only candidates whose new triple classify_claim() puts in the intended type
 (taxonomy sections 3-4), then picks at most one sample per type per answer.
-Implemented: relation_reversal, entity_swap, wrong_relation, fabricated_fact. To add a type,
-write an injector with the same signature and add it to INJECTORS and EXPECTED_VERDICT.
+Implemented: relation_reversal, entity_swap, wrong_relation, fabricated_fact, broken_chain.
+To add a type, write an injector with the same signature and add it to INJECTORS and
+EXPECTED_VERDICT.
 """
 import argparse
 import json
 import random
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -73,7 +75,12 @@ EXPECTED_VERDICT = {
     "entity_swap": "contradicted",
     "wrong_relation": "contradicted",
     "fabricated_fact": "unsupported",
+    "broken_chain": "contradicted",
 }
+
+DATE_RELATIONS = PERSON_DATE | WORK_DATE
+# A path claim is one triple whose relation joins the hop relations (docs/taxonomy.md, 3.4).
+PATH_SEP = " -> "
 
 Skips = dict[str, int]
 
@@ -89,13 +96,33 @@ def surface(name: str) -> str:
 
 
 def render(relation: str, subject: str, obj: str) -> str:
-    """Template sentence for (subject, relation, obj)."""
-    return TEMPLATES[relation].format(s=surface(subject), o=surface(obj))
+    """Template sentence for (subject, relation, obj); "in" instead of "on" for a bare year."""
+    template = TEMPLATES[relation]
+    if relation in DATE_RELATIONS and re.fullmatch(r"\d{4}", obj.strip()):
+        template = template.replace(" on {o}", " in {o}")
+    return template.format(s=surface(subject), o=surface(obj))
+
+
+def has_relation_path(graph: dict, start: str, end: str, relations: list[str]) -> bool:
+    """Whether a directed path start -> ... -> end follows exactly this relation sequence."""
+    frontier = {start}
+    for r in relations:
+        frontier = {e["object_key"] for e in graph["edges"]
+                    if e["relation"] == r and e["subject_key"] in frontier}
+        if not frontier:
+            return False
+    return end in frontier
 
 
 def classify_claim(triple: list[str], graph: dict) -> str:
-    """Taxonomy rules 1, 2, 3, 5 in decision order (section 4), on normalised keys."""
+    """Taxonomy rules in decision order (section 4), on normalised keys.
+
+    Single-edge triples: rules 1, 2, 3, 5. Path claims (relation contains " -> "): rule 4.
+    """
     s, r, o = normalise_entity(triple[0]), triple[1], normalise_entity(triple[2])
+    if PATH_SEP in r:
+        relations = [x.strip() for x in r.split(PATH_SEP.strip())]
+        return "supported" if has_relation_path(graph, s, o, relations) else "broken_chain"
     edges = {(e["subject_key"], e["relation"], e["object_key"]) for e in graph["edges"]}
     if (s, r, o) in edges:
         return "supported"
@@ -326,12 +353,55 @@ def inject_fabricated_fact(row: dict, rng: random.Random,
     return out, skips
 
 
+def inject_broken_chain(row: dict, rng: random.Random,
+                        pools: dict[str, list[str]]) -> tuple[list[dict], Skips]:
+    """Replace the end of an implied path with the last-hop object of a different intermediate."""
+    graph, out, skips = row["reference_graph"], [], {}
+    graph_keys = {n["key"] for n in graph["nodes"]}
+    edges = {e["index"]: e for e in graph["edges"]}
+    path_sentences = [s for s in row["sentences"] if s["paths"] and not s["edges"]]
+    if not path_sentences:
+        _skip(skips, "no_path_sentence")
+    for sent in path_sentences:
+        for path in sent["paths"]:
+            first, last = edges[path[0]], edges[path[-1]]
+            r_last, x_key, o_key = last["relation"], last["subject_key"], last["object_key"]
+            # a) wrong intermediate: the r_last object of another node in this graph
+            wrong = [(e["object"], e["subject"]) for e in graph["edges"]
+                     if e["relation"] == r_last and e["subject_key"] != x_key
+                     and e["object_key"] != o_key]
+            if wrong:
+                new_obj, wrong_intermediate = rng.choice(wrong)
+            else:
+                # b) an object of the same relation from outside this graph
+                options = [o for o in pools.get(r_last, []) if normalise_entity(o) not in graph_keys]
+                if not options:
+                    _skip(skips, "no_replacement")
+                    continue
+                new_obj, wrong_intermediate = rng.choice(options), None
+            span = find_span(sent["text"], _node(graph, o_key))
+            if span is None:
+                _skip(skips, "span_not_found")
+                continue
+            t = sent["text"]
+            new_text = t[:span[0]] + new_obj + t[span[1]:]
+            relation = PATH_SEP.join(edges[i]["relation"] for i in path)
+            sample = _edit_sample(row, "broken_chain", sent, new_text,
+                                  [first["subject"], relation, last["object"]],
+                                  [first["subject"], relation, new_obj])
+            sample["path_edges"] = list(path)
+            sample["wrong_intermediate"] = wrong_intermediate
+            out.append(sample)
+    return out, skips
+
+
 Injector = Callable[[dict, random.Random, dict[str, list[str]]], tuple[list[dict], Skips]]
 INJECTORS: dict[str, Injector] = {
     "relation_reversal": inject_relation_reversal,
     "entity_swap": inject_entity_swap,
     "wrong_relation": inject_wrong_relation,
     "fabricated_fact": inject_fabricated_fact,
+    "broken_chain": inject_broken_chain,
 }
 
 
@@ -432,6 +502,13 @@ def run_self_test() -> None:
     mismatch = {"error_type": "entity_swap", "original_sentence": "Anne Smith's father is John Smith.",
                 "new_sentence": "Anne Smith's father is Mary Smith.",
                 "new_triple": ["Anne Smith", "father", "Mary Smith"]}
+    # broken_chain
+    film_graph = build_reference_graph(film_ev)
+    chain_row = make_row(film_ev + [["Slunce, seno, jahody", "director", "Zdeněk Troška"],
+                                    ["Zdeněk Troška", "date of birth", "May 18, 1953"]],
+                         "The director of To Sleep with Anger was born on April 13, 1944.")
+    chain, _ = inject_row(chain_row, "broken_chain", 42, {}, {})
+    no_chain, nc_skips = inject_broken_chain(wr_row, random.Random(1), {})
 
     cases = [
         ("reversal sentence", rev_s is not None
@@ -471,6 +548,19 @@ def run_self_test() -> None:
          and len(fab["injected_answer"]) == len(fab_row["answer"]) + len(fab["new_sentence"]) + 1
          and classify_claim(fab["new_triple"], fab_row["reference_graph"]) == "fabricated_fact"),
         ("taxonomy_mismatch", validation_error(mismatch, fam) == "taxonomy_mismatch"),
+        ("year-only date", render("date of birth", "Anne Smith", "1953")
+         == "Anne Smith was born in 1953."),
+        ("classify path supported", classify_claim(
+            ["To Sleep with Anger", "director -> date of birth", "April 13, 1944"], film_graph)
+         == "supported"),
+        ("classify path broken", classify_claim(
+            ["To Sleep with Anger", "director -> date of birth", "May 18, 1953"], film_graph)
+         == "broken_chain"),
+        ("broken chain wrong intermediate", chain is not None
+         and chain["new_sentence"].endswith("born on May 18, 1953.")
+         and chain["wrong_intermediate"] == "Zdeněk Troška"),
+        ("no broken chain for direct edge", no_chain == []
+         and nc_skips.get("no_path_sentence") == 1),
     ]
     failed = 0
     for name, ok in cases:
@@ -485,8 +575,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run-name", default="pilot")
     parser.add_argument("--questions", type=Path, default=Path("data/questions/questions.jsonl"))
-    parser.add_argument("--types",
-                        default="relation_reversal,entity_swap,wrong_relation,fabricated_fact")
+    parser.add_argument("--types", default="relation_reversal,entity_swap,wrong_relation,"
+                                           "fabricated_fact,broken_chain")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
@@ -534,6 +624,12 @@ def main() -> None:
         "skips_per_type": {t: dict(sorted(s.items())) for t, s in skips.items()},
         "symmetric_relations": sorted(SYMMETRIC_RELATIONS),
         "reversible_relations": sorted(REVERSIBLE_RELATIONS),
+        "broken_chain_sources": {
+            "wrong_intermediate": sum(1 for s in samples if s["error_type"] == "broken_chain"
+                                      and s["wrong_intermediate"] is not None),
+            "pool": sum(1 for s in samples if s["error_type"] == "broken_chain"
+                        and s["wrong_intermediate"] is None),
+        },
         "relation_groups": {g: sorted(rels) for g, rels in RELATION_GROUPS.items()},
         "seed": args.seed,
         "created": created,
